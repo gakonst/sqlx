@@ -541,6 +541,15 @@ impl<DB: Database> Pool<DB> {
         self.0.num_idle()
     }
 
+    /// Returns the number of semaphore permits free right now: how many more
+    /// connections could be handed out without anyone waiting. Pyramid's
+    /// own addition (backend/vendor/README.md): with `size()` and `num_idle()`
+    /// it tells a permit lost without a connection, which every wait then
+    /// times out for, from a connection someone holds.
+    pub fn available_permits(&self) -> usize {
+        self.0.semaphore.permits()
+    }
+
     /// Gets a clone of the connection options for this pool
     pub fn connect_options(&self) -> Arc<<DB::Connection as Connection>::Options> {
         self.0
