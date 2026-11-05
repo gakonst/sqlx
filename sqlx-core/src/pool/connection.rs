@@ -28,6 +28,7 @@ pub struct PoolConnection<DB: Database> {
 pub(super) struct Live<DB: Database> {
     pub(super) raw: DB::Connection,
     pub(super) created_at: Instant,
+    pub(super) tag: u8,
 }
 
 pub(super) struct Idle<DB: Database> {
@@ -87,6 +88,19 @@ impl<DB: Database> PoolConnection<DB> {
     pub async fn close(mut self) -> Result<(), Error> {
         let floating = self.take_live().float(self.pool.clone());
         floating.inner.raw.close().await
+    }
+
+    /// The tag the caller last set on this connection, 0 for a new one. It stays with the
+    /// connection while it is idle in the pool.
+    pub fn tag(&self) -> u8 {
+        self.live.as_ref().map_or(0, |live| live.tag)
+    }
+
+    /// Set the tag returned by tag(), such as the session state the caller left it in.
+    pub fn set_tag(&mut self, tag: u8) {
+        if let Some(live) = self.live.as_mut() {
+            live.tag = tag;
+        }
     }
 
     /// Close this connection on-drop, instead of returning it to the pool.
@@ -257,6 +271,7 @@ impl<DB: Database> Floating<DB, Live<DB>> {
             inner: Live {
                 raw: conn,
                 created_at: Instant::now(),
+                tag: 0,
             },
             guard,
         }
