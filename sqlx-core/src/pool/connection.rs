@@ -314,6 +314,13 @@ impl<DB: Database> Floating<DB, Live<DB>> {
             }
         }
 
+        // a connection that finished its last exchange, with nothing queued or awaited, answered
+        // the server a moment ago and has nothing to flush, so it goes back untested
+        if self.raw.is_ready() {
+            self.release();
+            return true;
+        }
+
         // test the connection on-release to ensure it is still viable,
         // and flush anything time-sensitive like transaction rollbacks
         // if an Executor future/stream is dropped during an `.await` call, the connection

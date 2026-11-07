@@ -243,6 +243,11 @@ impl Connection for PgConnection {
     fn should_flush(&self) -> bool {
         !self.inner.stream.write_buffer().is_empty()
     }
+
+    #[doc(hidden)]
+    fn is_ready(&self) -> bool {
+        self.inner.pending_ready_for_query_count == 0 && !self.should_flush()
+    }
 }
 
 // Implement `AsMut<Self>` so that `PgConnection` can be wrapped in

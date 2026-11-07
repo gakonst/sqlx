@@ -165,6 +165,13 @@ pub trait Connection: Send {
     #[doc(hidden)]
     fn should_flush(&self) -> bool;
 
+    /// Whether the connection finished its last exchange with the server, with nothing queued to
+    /// send or awaited in reply, so a pool may take it back without testing it.
+    #[doc(hidden)]
+    fn is_ready(&self) -> bool {
+        false
+    }
+
     /// Establish a new database connection.
     ///
     /// A value of [`Options`][Self::Options] is parsed from the provided connection string. This parsing
