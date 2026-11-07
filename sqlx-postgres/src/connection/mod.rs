@@ -21,8 +21,10 @@ use crate::{PgConnectOptions, PgTypeInfo, Postgres};
 pub(crate) use sqlx_core::connection::*;
 use sqlx_core::sql_str::SqlSafeStr;
 
+pub use self::ahead::Ahead;
 pub use self::stream::PgStream;
 
+mod ahead;
 #[cfg(feature = "offline")]
 mod describe;
 mod establish;
@@ -74,6 +76,9 @@ pub struct PgConnectionInner {
     // current transaction status
     transaction_status: TransactionStatus,
     pub(crate) transaction_depth: usize,
+
+    // statements to run ahead of the next query
+    ahead: ahead::AheadQueue,
 
     log_settings: LogSettings,
 }

@@ -44,6 +44,12 @@ async fn prepare(
     // flush and wait until we are re-ready
     conn.wait_until_ready().await?;
 
+    // statements queued to run ahead of this query go before its PARSE, whose name lookups
+    // (a schema's USAGE among them) they may change
+    let idle = conn.idle();
+    let ahead = conn.take_ahead();
+    conn.write_ahead(&ahead)?;
+
     // next we send the PARSE command to the server
     conn.inner.stream.write_msg(Parse {
         param_types: &param_types,
@@ -62,12 +68,17 @@ async fn prepare(
     conn.write_sync();
     conn.inner.stream.flush().await?;
 
+    conn.skip_ahead(ahead.len()).await?;
+
     // indicates that the SQL query string is now successfully parsed and has semantic validity
     conn.inner.stream.recv_expect::<ParseComplete>().await?;
 
     let metadata = if let Some(metadata) = metadata {
         // each SYNC produces one READY FOR QUERY
         conn.recv_ready_for_query().await?;
+        if !ahead.is_empty() {
+            conn.ran_ahead(idle);
+        }
 
         // we already have metadata
         metadata
@@ -78,6 +89,9 @@ async fn prepare(
 
         // each SYNC produces one READY FOR QUERY
         conn.recv_ready_for_query().await?;
+        if !ahead.is_empty() {
+            conn.ran_ahead(idle);
+        }
 
         let metadata = conn
             .resolve_statement_metadata::<true>(Some(parameters), row_desc, resolve_column_origin)
@@ -210,6 +224,8 @@ impl PgConnection {
         self.wait_until_ready().await?;
 
         let mut metadata: Arc<PgStatementMetadata>;
+        let idle;
+        let ahead;
 
         let format = if let Some(mut arguments) = arguments {
             // Check this before we write anything to the stream.
@@ -238,6 +254,12 @@ impl PgConnection {
 
             // consume messages till `ReadyForQuery` before bind and execute
             self.wait_until_ready().await?;
+
+            // statements queued to run ahead of this query go first, in the same message
+            idle = self.idle();
+            let statements = self.take_ahead();
+            self.write_ahead(&statements)?;
+            ahead = statements.len();
 
             // bind to attach the arguments to the statement and create a portal
             self.inner.stream.write_msg(Bind {
@@ -280,8 +302,18 @@ impl PgConnection {
             // prepared statements are binary
             PgValueFormat::Binary
         } else {
-            // Query will trigger a ReadyForQuery
-            self.queue_simple_query(sql)?;
+            // Query will trigger a ReadyForQuery, after the statements queued to run ahead of it
+            idle = self.idle();
+            let statements = self.take_ahead();
+            ahead = statements.len();
+            if statements.is_empty() {
+                self.queue_simple_query(sql)?;
+            } else {
+                let mut query = statements.join(";");
+                query.push(';');
+                query.push_str(sql);
+                self.queue_simple_query(&query)?;
+            }
 
             // metadata starts out as "nothing"
             metadata = Arc::new(PgStatementMetadata::default());
@@ -293,8 +325,23 @@ impl PgConnection {
         self.inner.stream.flush().await?;
 
         Ok(try_stream! {
+            let mut skip = ahead;
             loop {
                 let message = self.inner.stream.recv().await?;
+
+                // the results of the statements run ahead of this query are discarded
+                if skip > 0 {
+                    match message.format {
+                        BackendMessageFormat::CommandComplete => {
+                            skip -= 1;
+                            continue;
+                        }
+                        BackendMessageFormat::RowDescription | BackendMessageFormat::DataRow => {
+                            continue;
+                        }
+                        _ => {}
+                    }
+                }
 
                 match message.format {
                     BackendMessageFormat::BindComplete
@@ -359,6 +406,9 @@ impl PgConnection {
                     BackendMessageFormat::ReadyForQuery => {
                         // processing of the query string is complete
                         self.handle_ready_for_query(message)?;
+                        if ahead > 0 {
+                            self.ran_ahead(idle);
+                        }
                         break;
                     }
 

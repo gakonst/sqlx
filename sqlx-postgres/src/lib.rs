@@ -50,6 +50,8 @@ pub use advisory_lock::{PgAdvisoryLock, PgAdvisoryLockGuard, PgAdvisoryLockKey};
 pub use arguments::{PgArgumentBuffer, PgArguments};
 pub use bind_iter::PgBindIterExt;
 pub use column::PgColumn;
+#[doc(hidden)]
+pub use connection::Ahead;
 pub use connection::PgConnection;
 pub use copy::{PgCopyIn, PgPoolCopyExt};
 pub use database::Postgres;

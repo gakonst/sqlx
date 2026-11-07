@@ -28,6 +28,10 @@ impl StatementId {
 
     pub const NAMED_START: Self = Self(IdInner::NAMED_START);
 
+    /// The statement a connection prepares, runs and closes for each statement it runs ahead of
+    /// a query; `next()` never reaches it.
+    pub const AHEAD: Self = Self(IdInner::LAST);
+
     #[cfg(test)]
     pub const TEST_VAL: Self = Self(IdInner::TEST_VAL);
 
@@ -95,15 +99,18 @@ impl IdInner {
 
     const NAMED_START: Self = Self(Some(NonZeroU32::MIN));
 
+    const LAST: Self = Self(Some(NonZeroU32::MAX));
+
     #[cfg(test)]
     pub const TEST_VAL: Self = Self(NonZeroU32::new(1234567890));
 
     #[inline(always)]
     fn next(&self) -> Self {
-        Self(
-            self.0
-                .map(|id| id.checked_add(1).unwrap_or(NonZeroU32::MIN)),
-        )
+        Self(self.0.map(|id| {
+            id.checked_add(1)
+                .filter(|next| *next != NonZeroU32::MAX)
+                .unwrap_or(NonZeroU32::MIN)
+        }))
     }
 
     #[allow(unused)]
